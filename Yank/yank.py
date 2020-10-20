@@ -1350,6 +1350,8 @@ class AlchemicalPhase(object):
             alchemical_counterions = mpiplus.run_single_node(0, pipeline.find_alchemical_counterions,
                                                              system, topography, alchemical_region_name,
                                                              broadcast_result=True)
+       	    if alchemical_region_name == 'ligand_atoms':
+       	       	alchemical_counterions = [34867, 34853]
             alchemical_atoms += alchemical_counterions
 
             # Sort them by index for safety. We don't want to
