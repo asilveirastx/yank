@@ -3142,13 +3142,35 @@ class ExperimentBuilder(object):
             # Start from AlchemicalPhase default alchemical region
             # and modified it according to the user options.
             phase_protocol = protocol[phase_name]['alchemical_path']
-            alchemical_region = AlchemicalPhase._build_default_alchemical_region(system, topography,
-                                                                                 phase_protocol)
+            alchemical_region, alchemical_counterions = AlchemicalPhase._build_default_alchemical_region(system, topography,
+                                                                                 phase_protocol, sampler_state)
+
             alchemical_region = alchemical_region._replace(**alchemical_region_opts)
 
             # Apply restraint only if this is the first phase. AlchemicalPhase
             # will take care of raising an error if the phase type does not support it.
             if phase_idx == 0:
+                lig_center =  np.mean(sampler_state.positions[topography.ligand_atoms].value_in_unit(unit.nanometers), axis=0)
+                fc = 1000*unit.kilojoule_per_mole/unit.nanometer**2
+                cvs = openmm.CustomCentroidBondForce(2, '(k/2)*(distance(g1,g2) - r0)^2')
+                cvs.addGlobalParameter('k', fc)
+                cvs.addPerBondParameter('r0')
+                cvs.addGroup(topography.ligand_atoms)
+                l = [sampler_state.box_vectors[k][k].value_in_unit(unit.nanometers) for k in range(3)]
+                d = np.empty(3)
+                for i, ion in enumerate(alchemical_counterions):
+                    pos = sampler_state.positions[ion].value_in_unit(unit.nanometers)
+                    for k in range(3):
+                        d[k] = (pos[k]-lig_center[k]) - l[k]*round((pos[k]-lig_center[k])/l[k])
+                        pos[k] = (lig_center[k] + d[k])
+                    sampler_state.positions[ion] = pos*unit.nanometers
+                    cvs.addGroup([ion])
+                    cvs.addBond([0, i+1], [np.linalg.norm(d)])
+                restraint_force = openmm.CustomCVForce('cvs')
+                restraint_force.addCollectiveVariable('cvs', cvs)
+                system = thermodynamic_state.system
+                system.addForce(restraint_force)
+                thermodynamic_state.system = system
                 restraint = self._create_experiment_restraint(experiment)
             else:
                 restraint = None

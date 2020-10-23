@@ -234,7 +234,7 @@ def compute_net_charge(system, atom_indices):
     return net_charge
 
 
-def find_alchemical_counterions(system, topography, region_name):
+def find_alchemical_counterions(system, topography, region_name, sampler_state):
     """Return the atom indices of the ligand or solute counter ions.
 
     In periodic systems, the solvation box needs to be neutral, and
@@ -289,8 +289,33 @@ def find_alchemical_counterions(system, topography, region_name):
     logger.debug('Ions net charges: {}'.format(ions_names_charges))
 
     # Find minimal subset of counterions whose charges sums to -mol_net_charge.
-    for n_ions in range(1, len(ions_net_charges) + 1):
-        for ion_subset in itertools.combinations(ions_net_charges, n_ions):
+
+    if region_name == 'ligand_atoms':
+        lx = sampler_state.box_vectors[0][0]
+        ly = sampler_state.box_vectors[1][1]
+        lz = sampler_state.box_vectors[2][2]
+        lig_center =  np.mean(sampler_state.positions[topography.ligand_atoms], axis=0)
+        cation = []
+        anion = []
+        for id, charge in ions_net_charges:
+            dx = (sampler_state.positions[id][0]-lig_center[0]) - lx*round((sampler_state.positions[id][0]-lig_center[0])/lx)
+            dy = (sampler_state.positions[id][1]-lig_center[1]) - ly*round((sampler_state.positions[id][1]-lig_center[1])/ly)
+            dz = (sampler_state.positions[id][2]-lig_center[2]) - lz*round((sampler_state.positions[id][2]-lig_center[2])/lz)
+            r = np.sqrt(dx*dx + dy*dy + dz*dz)
+            if charge > 0:
+                cation.append((id, r))
+            else:
+                anion.append((id, r))
+        distant_ions_subset = sorted(cation)[-3:] + sorted(anion)[-3:]
+        ions_net_charges_subset = []
+        for (id, charge) in ions_net_charges:
+            for (idx, r) in distant_ions_subset:
+                if id == idx:
+                    ions_net_charges_subset.append((id, charge))
+    else:
+        ions_net_charges_subset= ions_net_charges
+    for n_ions in range(1, len(ions_net_charges_subset) + 1):
+        for ion_subset in itertools.combinations(ions_net_charges_subset, n_ions):
             counterions_indices, counterions_charges = zip(*ion_subset)
             if sum(counterions_charges) == -mol_net_charge:
                 return counterions_indices
@@ -512,7 +537,7 @@ def read_system_files(positions_file_path, parameters_file_path, system_options,
         create_system_args = set(inspect.getargspec(openmm.app.CharmmPsfFile.createSystem).args)
         system_options['params'] = params
         system = create_system(parameters_file, box_vectors, create_system_args, system_options)
-            
+
     # Unsupported file format.
     else:
         raise ValueError('Unsupported format for parameter file {}'.format(parameters_file_extension))

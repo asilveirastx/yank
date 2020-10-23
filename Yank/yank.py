@@ -1006,8 +1006,9 @@ class AlchemicalPhase(object):
 
         # Handle default alchemical region.
         if alchemical_regions is None:
-            alchemical_regions = self._build_default_alchemical_region(
-                reference_system, topography, protocol)
+            alchemical_counterions = None
+            alchemical_regions, alchemical_counterions = self._build_default_alchemical_region(
+                reference_system, topography, protocol, sampler_states[0])
 
         # Check that we have atoms to alchemically modify.
         if len(alchemical_regions.alchemical_atoms) == 0:
@@ -1017,6 +1018,8 @@ class AlchemicalPhase(object):
         logger.debug("Creating alchemically-modified states...")
         if alchemical_factory is None:
             alchemical_factory = mmtools.alchemy.AbsoluteAlchemicalFactory(disable_alchemical_dispersion_correction=True)
+
+
         alchemical_system = alchemical_factory.create_alchemical_system(thermodynamic_state.system,
                                                                         alchemical_regions)
 
@@ -1331,7 +1334,7 @@ class AlchemicalPhase(object):
         return thermodynamic_state
 
     @staticmethod
-    def _build_default_alchemical_region(system, topography, protocol):
+    def _build_default_alchemical_region(system, topography, protocol, sampler_state):
         """Create a default AlchemicalRegion if the user hasn't provided one."""
         # TODO: we should probably have a second region that annihilate sterics of counterions.
         alchemical_region_kwargs = {}
@@ -1349,11 +1352,10 @@ class AlchemicalPhase(object):
         if system.usesPeriodicBoundaryConditions():
             alchemical_counterions = mpiplus.run_single_node(0, pipeline.find_alchemical_counterions,
                                                              system, topography, alchemical_region_name,
+                                                             sampler_state,
                                                              broadcast_result=True)
-       	    if alchemical_region_name == 'ligand_atoms':
-       	       	alchemical_counterions = [34867, 34853]
-            alchemical_atoms += alchemical_counterions
 
+            alchemical_atoms += alchemical_counterions
             # Sort them by index for safety. We don't want to
             # accidentally exchange two atoms' positions.
             alchemical_atoms = sorted(alchemical_atoms)
@@ -1371,7 +1373,7 @@ class AlchemicalPhase(object):
         # Create alchemical region.
         alchemical_region = mmtools.alchemy.AlchemicalRegion(**alchemical_region_kwargs)
 
-        return alchemical_region
+        return alchemical_region, alchemical_counterions
 
     @staticmethod
     def _find_similar_sampler_states(sampler_states):
